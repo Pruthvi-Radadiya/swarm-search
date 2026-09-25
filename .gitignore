@@ -1,0 +1,22 @@
+# Colcon / ROS
+build/
+install/
+log/
+*.pyc
+__pycache__/
+*.egg-info/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local notes 
+docs/
+
+# Runtime junk
+launch/tmp_sdf/
+*.bag
+frames_*.gv
+frames_*.pdf
