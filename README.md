@@ -21,21 +21,26 @@ Earlier PyBullet / single-drone experiments live under `archive/` and are not pa
 - [x] 3-robot spawn with namespaced SLAM, Nav2, and TF trees
 - [x] Autonomous Nav2 goal navigation (single robot, then fleet)
 - [x] Live occupancy-map fusion → `/shared_map` (Gazebo ground-truth alignment)
-- [x] Frozen team map (`maps/house_shared`)
-- [ ] Cross-robot navigation on the shared map
-- [ ] Frontier-based coverage (planned)
+- [x] Frozen team map (`maps/house_shared`) + R2 Nav on saved map (AMCL)
+- [x] Frontier detection + greedy multi-robot explore (`explore_swarm`)
+- [x] Coverage vs time metric (see below)
+- [ ] Limited-range comms (skipped for now)
+- [ ] Aerial / query detect (roadmap later)
 
 ## Repository layout
 
 ```
 swarm-search/
-├── launch/              # Gazebo spawn, SLAM, Nav2 wrappers
-├── nav2_params/         # Per-robot Nav2 configs
-├── slam_params/         # Per-robot slam_toolbox configs
-├── worlds/              # Gazebo house world
-├── maps/                # Saved team map (house_shared)
-├── src/map_merge_swarm/ # Map merge + GT TF nodes
-└── archive/             # Old PyBullet phase (not used)
+├── launch/                 # Gazebo spawn, SLAM, Nav2 wrappers
+├── nav2_params/            # Per-robot Nav2 configs (RPP on burger_tb3_*)
+├── slam_params/            # Per-robot slam_toolbox configs
+├── worlds/                 # Gazebo turtle / house world
+├── maps/                   # Saved team maps (house_shared*)
+├── analysis/               # Coverage logger + CSV / plots
+├── src/map_merge_swarm/    # Map merge + GT TF nodes
+├── src/explore_swarm/      # Frontiers + goal assigner + explore.launch.py
+├── docs/                   # Startup, plans, engineering notes
+└── archive/                # Old PyBullet phase (not used)
 ```
 
 ## Prerequisites
@@ -159,6 +164,42 @@ ros2 lifecycle set /map_server configure
 ros2 lifecycle set /map_server activate
 ```
 
+## Coverage vs time
+
+While the swarm explores, `analysis/coverage_logger.py` samples `/shared_map` every 5 s into `analysis/coverage.csv`.
+
+The shared grid is ~20×20 m; the TurtleBot3 turtle world is much smaller, so raw `known_frac` of the canvas stays low (~few %). For demos we normalize so **100% = known cells at the end of the run** (turtle filled):
+
+![Coverage vs time](analysis/coverage_pct.png)
+
+```bash
+# After T0–T7 are up, start logger, then explore:
+cd ~/swarm-search/analysis
+python3 coverage_logger.py
+# other terminal:
+ros2 launch explore_swarm explore.launch.py
+# Ctrl+C logger when done → plot (100% = final known cells):
+python3 - <<'PY'
+import csv
+from pathlib import Path
+import matplotlib.pyplot as plt
+rows = list(csv.DictReader(Path("coverage.csv").open()))
+known = lambda r: int(r["free"]) + int(r["occupied"])
+k_end = known(rows[-1])
+t0 = float(rows[0]["wall_time"])
+t = [float(r["wall_time"]) - t0 for r in rows]
+y = [100.0 * known(r) / k_end for r in rows]
+plt.plot(t, y, marker="o")
+plt.xlabel("time (s)"); plt.ylabel("coverage (%)")
+plt.title("Turtle world coverage vs time")
+plt.ylim(0, 105); plt.grid(True, alpha=0.3)
+plt.tight_layout(); plt.savefig("coverage_pct.png", dpi=150)
+print("saved coverage_pct.png")
+PY
+```
+
+Full bring-up order: `docs/startup-after-break.md`.
+
 ## Notes
 
 - Start Nav2 only after that robot’s `TB3_N/map` TF exists, or the global costmap will time out.
@@ -167,9 +208,13 @@ ros2 lifecycle set /map_server activate
 
 ## Roadmap (short)
 
-1. Prove robot 2 navigates on the shared / saved team map (AMCL + Nav2)
-2. Frontier detection and greedy assignment for decentralized coverage
-3. Limited-range communication for map sharing (comms on/off ablation)
+1. ~~Prove robot 2 navigates on the shared / saved team map (AMCL + Nav2)~~ **done** (Step 3)
+2. ~~Frontier detection and greedy assignment for decentralized coverage~~ **done** (Step 5)
+3. ~~Coverage vs time~~ **done** (`analysis/`)
+4. Limited-range communication (comms on/off) — **skipped for now** (future)
+5. Next big: aerial / query detect (roadmap Phase 3+)
+
+**Study notes:** `docs/engineering-notes-map-explore.md` · **Bring-up:** `docs/startup-after-break.md` (§3 live, §6 Step 3)
 
 ## License
 

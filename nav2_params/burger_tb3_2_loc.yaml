@@ -5,12 +5,12 @@ amcl:
     alpha3: 0.2
     alpha4: 0.2
     alpha5: 0.2
-    base_frame_id: "TB3_1/base_footprint"
+    base_frame_id: "TB3_2/base_footprint"
     beam_skip_distance: 0.5
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
     do_beamskip: false
-    global_frame_id: "TB3_1/map"
+    global_frame_id: "shared_map"
     lambda_short: 0.1
     laser_likelihood_max_dist: 2.0
     laser_max_range: 100.0
@@ -19,7 +19,7 @@ amcl:
     max_beams: 60
     max_particles: 2000
     min_particles: 500
-    odom_frame_id: "TB3_1/odom"
+    odom_frame_id: "TB3_2/odom"
     pf_err: 0.05
     pf_z: 0.99
     recovery_alpha_fast: 0.0
@@ -37,7 +37,7 @@ amcl:
     z_rand: 0.5
     z_short: 0.05
     scan_topic: scan
-    map_topic: map
+    map_topic: /map
     set_initial_pose: false
     always_reset_initial_pose: false
     first_map_only: false
@@ -50,8 +50,8 @@ amcl:
 bt_navigator:
   ros__parameters:
     use_sim_time: True
-    global_frame: TB3_1/map
-    robot_base_frame: TB3_1/base_footprint
+    global_frame: shared_map 
+    robot_base_frame: TB3_2/base_footprint
     transform_tolerance: 0.5
     filter_duration: 0.3
     default_nav_to_pose_bt_xml: "$(find-pkg-share nav2_bt_navigator)/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml" # behavior trees location.
@@ -119,7 +119,7 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.20
       yaw_goal_tolerance: 6.28
-    # RPP follows the global path; DWB+RotateToGoal caused large-radius circles / tips.
+    # RPP follows the global path; DWB+RotateToGoal caused large-radius circles.
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       desired_linear_vel: 0.22
@@ -151,8 +151,8 @@ local_costmap:
       use_sim_time: True
       update_frequency: 5.0
       publish_frequency: 2.0
-      global_frame: TB3_1/odom
-      robot_base_frame: TB3_1/base_footprint
+      global_frame: TB3_2/odom
+      robot_base_frame: TB3_2/base_footprint
       rolling_window: true
       width: 3
       height: 3
@@ -162,13 +162,13 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         inflation_radius: 0.3
-        cost_scaling_factor: 5.0
+        cost_scaling_factor: 3.0
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
         observation_sources: scan
         scan:
-          topic: /scan
+          topic: /TB3_2/scan
           max_obstacle_height: 2.0
           clearing: true
           marking: true
@@ -184,7 +184,7 @@ local_costmap:
         mark_threshold: 0
         observation_sources: scan
         scan:
-          topic: /scan
+          topic: /TB3_2/scan
           max_obstacle_height: 2.0
           clearing: true
           marking: true
@@ -195,6 +195,7 @@ local_costmap:
           obstacle_min_range: 0.0
       static_layer:
         map_subscribe_transient_local: true
+        map_topic: /map
       always_send_full_costmap: true
 
 global_costmap:
@@ -203,8 +204,8 @@ global_costmap:
       use_sim_time: True
       update_frequency: 1.0
       publish_frequency: 1.0
-      global_frame: TB3_1/map
-      robot_base_frame: TB3_1/base_footprint
+      global_frame: shared_map 
+      robot_base_frame: TB3_2/base_footprint
       transform_tolerance: 0.5
       robot_radius: 0.1
       resolution: 0.05
@@ -215,7 +216,7 @@ global_costmap:
         enabled: true
         observation_sources: scan
         scan:
-          topic: /scan
+          topic: /TB3_2/scan
           max_obstacle_height: 2.0
           clearing: true
           marking: true
@@ -235,7 +236,7 @@ global_costmap:
         mark_threshold: 0
         observation_sources: scan
         scan:
-          topic: /scan
+          topic: /TB3_2/scan
           max_obstacle_height: 2.0
           clearing: true
           marking: true
@@ -247,16 +248,17 @@ global_costmap:
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: true
+        map_topic: /map
         transform_tolerance: 0.1
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         inflation_radius: 0.3
-        cost_scaling_factor: 5.0
+        cost_scaling_factor: 3.0
       always_send_full_costmap: true
 
 map_server:
   ros__parameters:
-    yaml_filename: "map.yaml"
+    yaml_filename: "/home/pruth/swarm-search/maps/house_shared.yaml"
 
 map_saver:
   ros__parameters:
@@ -294,9 +296,9 @@ behavior_server:
       plugin: "nav2_behaviors/Wait" # In Iron and older versions, "/" was used instead of "::"
     assisted_teleop:
       plugin: "nav2_behaviors/AssistedTeleop" # In Iron and older versions, "/" was used instead of "::"
-    local_frame: TB3_1/odom
-    global_frame: TB3_1/map
-    robot_base_frame: TB3_1/base_footprint
+    local_frame: TB3_2/odom
+    global_frame: shared_map 
+    robot_base_frame: TB3_2/base_footprint
     transform_timeout: 0.1
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.0
@@ -316,8 +318,8 @@ waypoint_follower:
 
 collision_monitor:
   ros__parameters:
-    base_frame_id: "TB3_1/base_footprint"
-    odom_frame_id: "TB3_1/odom"
+    base_frame_id: "TB3_2/base_footprint"
+    odom_frame_id: "TB3_2/odom"
     cmd_vel_in_topic: "cmd_vel_smoothed"
     cmd_vel_out_topic: "cmd_vel"
     state_topic: "collision_monitor_state"
@@ -401,7 +403,7 @@ collision_monitor:
     scan:
       source_timeout: 0.2
       type: "scan"
-      topic: "/scan"
+      topic: "/TB3_2/scan"
       enabled: true
 
 velocity_smoother:

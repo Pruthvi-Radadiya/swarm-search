@@ -48,6 +48,26 @@ ros2 lifecycle set /map_server activate
 - Map → Topic → **Durability: Transient Local** (otherwise “No map received”)
 - Color Scheme: `map` (walls black; free/unknown look grey — normal)
 
-### Next
+### Live session saves (Step 4)
 
-Step 3 (`docs/todo-global-map-nav.md`): R2 AMCL + Nav2 on this saved map.
+While T7 merge runs, snapshot the **live** team map (do **not** rely on default 2 s timeout):
+
+```bash
+ros2 run nav2_map_server map_saver_cli \
+  -t /shared_map \
+  -f ~/swarm-search/maps/house_shared_live \
+  --ros-args \
+  -p use_sim_time:=true \
+  -p map_subscribe_transient_local:=true \
+  -p save_map_timeout:=15.0
+```
+
+- **Files:** `house_shared_live.yaml` + `house_shared_live.pgm` (Step 4 mid-session; half-house OK)
+- **Policy:** use `_live` suffix so `house_shared` (Step 1/2 full freeze) is not overwritten unless you choose Option A with `-f .../house_shared`
+- Details: **`docs/plan-step4-live-sharing.md`**
+
+### Next / related
+
+Step 5 **done** — multi-robot explore + `ros2 launch explore_swarm explore.launch.py`.  
+Comms radius **skipped for now**. Coverage-vs-time optional (samples `/shared_map` only).  
+Bring-up: **`docs/startup-after-break.md`**. Concepts: **`docs/engineering-notes-map-explore.md`**.
