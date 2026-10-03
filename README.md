@@ -1,8 +1,16 @@
 # Swarm Search — Multi-Robot Search & Rescue (ROS 2)
 
-Indoor multi-robot search simulation in Gazebo. Three TurtleBot3 Burgers run SLAM and Nav2 under separate namespaces and fuse their occupancy maps into one shared team map.
+Indoor multi-robot exploration in Gazebo: **three TurtleBot3 Burgers** each run SLAM and Nav2, fuse lidar maps into one team occupancy grid (`/shared_map`), then **autonomously explore** unknown space with frontier detection and greedy goal assignment. Coverage of the turtle world is logged over time for evaluation.
 
 Earlier PyBullet / single-drone experiments live under `archive/` and are not part of the active stack.
+
+## Features
+
+- Namespaced multi-robot bring-up (SLAM + Nav2 + shared `/tf`)
+- Live map merge with Gazebo ground-truth alignment → `/shared_map`
+- Save / reload a frozen team map; navigate on it with AMCL (TB3_2)
+- Frontier detection + greedy multi-robot `NavigateToPose` (`explore_swarm`)
+- Coverage-vs-time logging and plot (`analysis/`)
 
 ## Stack
 
@@ -13,33 +21,22 @@ Earlier PyBullet / single-drone experiments live under `archive/` and are not pa
 | Sim | Gazebo Classic |
 | Robots | TurtleBot3 Burger ×3 |
 | Mapping | slam_toolbox (online async) |
-| Navigation | Nav2 (RotationShim + DWB) |
-| Shared map | Custom `map_merge_swarm` package |
-
-## Current status
-
-- [x] 3-robot spawn with namespaced SLAM, Nav2, and TF trees
-- [x] Autonomous Nav2 goal navigation (single robot, then fleet)
-- [x] Live occupancy-map fusion → `/shared_map` (Gazebo ground-truth alignment)
-- [x] Frozen team map (`maps/house_shared`) + R2 Nav on saved map (AMCL)
-- [x] Frontier detection + greedy multi-robot explore (`explore_swarm`)
-- [x] Coverage vs time metric (see below)
-- [ ] Limited-range comms (skipped for now)
-- [ ] Aerial / query detect (roadmap later)
+| Navigation | Nav2 + Regulated Pure Pursuit (RPP) |
+| Shared map | `map_merge_swarm` (GT TF + fuse) |
+| Exploration | `explore_swarm` (frontiers + greedy assign) |
 
 ## Repository layout
 
 ```
 swarm-search/
-├── launch/                 # Gazebo spawn, SLAM, Nav2 wrappers
-├── nav2_params/            # Per-robot Nav2 configs (RPP on burger_tb3_*)
+├── launch/                 # Gazebo spawn, SLAM, Nav2, localization
+├── nav2_params/            # Per-robot Nav2 configs
 ├── slam_params/            # Per-robot slam_toolbox configs
-├── worlds/                 # Gazebo turtle / house world
+├── worlds/                 # Gazebo world
 ├── maps/                   # Saved team maps (house_shared*)
 ├── analysis/               # Coverage logger + CSV / plots
 ├── src/map_merge_swarm/    # Map merge + GT TF nodes
-├── src/explore_swarm/      # Frontiers + goal assigner + explore.launch.py
-├── docs/                   # Startup, plans, engineering notes
+├── src/explore_swarm/      # Frontiers, goal assigner, explore.launch.py
 └── archive/                # Old PyBullet phase (not used)
 ```
 
@@ -48,6 +45,7 @@ swarm-search/
 - ROS 2 Humble desktop
 - Gazebo Classic + `turtlebot3` / `turtlebot3_gazebo` / `turtlebot3_navigation2` / `turtlebot3_teleop`
 - `slam_toolbox`, `nav2_bringup`, `ros-humble-gazebo-ros-pkgs`
+- `python3-matplotlib` (optional, to regenerate the coverage plot)
 
 ```bash
 export TURTLEBOT3_MODEL=burger
@@ -60,15 +58,15 @@ export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:/opt/ros/humble/share/turtlebot3_gaz
 cd ~/swarm-search
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
-colcon build --packages-select map_merge_swarm
+colcon build --packages-select map_merge_swarm explore_swarm
 source install/setup.bash
 ```
 
-Rebuild only after changing `src/map_merge_swarm/`.
+Rebuild those packages after you change their source or launch files.
 
-## Run
+## Run (terminals T0–T9)
 
-Use a **separate terminal** for each block below. In every terminal:
+Use a **separate terminal** for each block. In **every** terminal first:
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -78,7 +76,16 @@ export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:/opt/ros/humble/share/turtlebot3_gaz
 cd ~/swarm-search
 ```
 
-### 1. Gazebo + three robots
+| Terminal | Role |
+|----------|------|
+| **T0** | Gazebo + 3 robots |
+| **T1–T3** | SLAM (one per robot) |
+| **T4–T6** | Nav2 (one per robot; start after that robot’s map TF exists) |
+| **T7** | Map merge → `/shared_map` |
+| **T8** | RViz |
+| **T9** | Autonomous explore (`explore.launch.py`) |
+
+### T0 — Gazebo + three robots
 
 ```bash
 mkdir -p ~/swarm-search/launch/tmp_sdf
@@ -87,7 +94,7 @@ ros2 launch ~/swarm-search/launch/multi_robot_spawn.launch.py use_sim_time:=true
 
 Expect a short pause (~8 s) before robots appear. ALSA / sound errors on WSL are harmless.
 
-### 2. SLAM (one terminal per robot)
+### T1–T3 — SLAM
 
 ```bash
 ros2 launch ~/swarm-search/launch/slam_tb3.launch.py \
@@ -107,9 +114,9 @@ ros2 launch ~/swarm-search/launch/slam_tb3.launch.py \
   slam_params_file:=$HOME/swarm-search/slam_params/mapper_params_tb3_3.yaml
 ```
 
-Quick check: `ros2 param get /TB3_1/slam_toolbox map_frame` → `TB3_1/map`.
+Check: `ros2 param get /TB3_1/slam_toolbox map_frame` → `TB3_1/map`.
 
-### 3. Nav2 (after each robot’s map TF exists)
+### T4–T6 — Nav2
 
 ```bash
 ros2 launch ~/swarm-search/launch/nav2_tb3.launch.py \
@@ -129,15 +136,15 @@ ros2 launch ~/swarm-search/launch/nav2_tb3.launch.py \
   params_file:=$HOME/swarm-search/nav2_params/burger_tb3_3.yaml
 ```
 
-### 4. Map merge
+### T7 — Map merge
 
 ```bash
 ros2 launch map_merge_swarm map_merge.launch.py
 ```
 
-Publishes `/shared_map` in frame `shared_map` (GT TF alignment + merge node).
+Publishes `/shared_map` in frame `shared_map` (GT TF alignment + merge).
 
-### 5. RViz
+### T8 — RViz
 
 ```bash
 ros2 run rviz2 rviz2 --ros-args -p use_sim_time:=true
@@ -145,6 +152,15 @@ ros2 run rviz2 rviz2 --ros-args -p use_sim_time:=true
 
 - Global Options → Fixed Frame: `shared_map`
 - Add → Map → Topic: `/shared_map`
+- Optional: PoseArray `/frontiers` or MarkerArray `/frontiers_markers`
+
+### T9 — Autonomous explore
+
+```bash
+ros2 launch explore_swarm explore.launch.py
+```
+
+Starts frontier detection and greedy multi-robot goal assignment.
 
 ### Optional — teleop one robot
 
@@ -152,7 +168,7 @@ ros2 run rviz2 rviz2 --ros-args -p use_sim_time:=true
 ros2 run turtlebot3_teleop teleop_keyboard --ros-args -r __ns:=/TB3_1
 ```
 
-### Optional — reload the frozen team map
+### Optional — load the frozen team map
 
 ```bash
 ros2 run nav2_map_server map_server --ros-args \
@@ -164,57 +180,70 @@ ros2 lifecycle set /map_server configure
 ros2 lifecycle set /map_server activate
 ```
 
+For AMCL + Nav2 on that map (TB3_2), use `launch/nav2_tb3_localization.launch.py` and `nav2_params/burger_tb3_2_loc.yaml` (do not run SLAM on TB3_2 at the same time).
+
 ## Coverage vs time
 
-While the swarm explores, `analysis/coverage_logger.py` samples `/shared_map` every 5 s into `analysis/coverage.csv`.
-
-The shared grid is ~20×20 m; the TurtleBot3 turtle world is much smaller, so raw `known_frac` of the canvas stays low (~few %). For demos we normalize so **100% = known cells at the end of the run** (turtle filled):
+Example result from a full explore run (100% = known cells when the turtle world was fully mapped; the shared canvas is larger than the world, so raw canvas fill stays lower):
 
 ![Coverage vs time](analysis/coverage_pct.png)
 
+### Reproduce the graph
+
+With **T0–T7** running, start the logger, then **T9**:
+
 ```bash
-# After T0–T7 are up, start logger, then explore:
+# Terminal A — logger
 cd ~/swarm-search/analysis
 python3 coverage_logger.py
-# other terminal:
+```
+
+```bash
+# Terminal B — explore (if not already on T9)
 ros2 launch explore_swarm explore.launch.py
-# Ctrl+C logger when done → plot (100% = final known cells):
+```
+
+Let the robots finish the map, then **Ctrl+C** the logger. Plot (normalizes so the final known cell count is 100%):
+
+```bash
+cd ~/swarm-search/analysis
 python3 - <<'PY'
 import csv
 from pathlib import Path
 import matplotlib.pyplot as plt
+
 rows = list(csv.DictReader(Path("coverage.csv").open()))
 known = lambda r: int(r["free"]) + int(r["occupied"])
 k_end = known(rows[-1])
 t0 = float(rows[0]["wall_time"])
 t = [float(r["wall_time"]) - t0 for r in rows]
 y = [100.0 * known(r) / k_end for r in rows]
-plt.plot(t, y, marker="o")
-plt.xlabel("time (s)"); plt.ylabel("coverage (%)")
+
+plt.figure(figsize=(8, 4))
+plt.plot(t, y, marker="o", linewidth=2)
+plt.xlabel("time (s)")
+plt.ylabel("coverage (%)")
 plt.title("Turtle world coverage vs time")
-plt.ylim(0, 105); plt.grid(True, alpha=0.3)
-plt.tight_layout(); plt.savefig("coverage_pct.png", dpi=150)
+plt.ylim(0, 105)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig("coverage_pct.png", dpi=150)
 print("saved coverage_pct.png")
 PY
 ```
-
-Full bring-up order: `docs/startup-after-break.md`.
 
 ## Notes
 
 - Start Nav2 only after that robot’s `TB3_N/map` TF exists, or the global costmap will time out.
 - Do not run an old standalone `static_map_tfs` launch together with `map_merge.launch.py` (duplicate TFs).
 - Kill leftover Gazebo before relaunching: `pkill -9 gzserver; pkill -9 gzclient`
+- Gazebo models must be `burger_*` (set `TURTLEBOT3_MODEL=burger`) for GT map TFs.
 
-## Roadmap (short)
+## Future work
 
-1. ~~Prove robot 2 navigates on the shared / saved team map (AMCL + Nav2)~~ **done** (Step 3)
-2. ~~Frontier detection and greedy assignment for decentralized coverage~~ **done** (Step 5)
-3. ~~Coverage vs time~~ **done** (`analysis/`)
-4. Limited-range communication (comms on/off) — **skipped for now** (future)
-5. Next big: aerial / query detect (roadmap Phase 3+)
-
-**Study notes:** `docs/engineering-notes-map-explore.md` · **Bring-up:** `docs/startup-after-break.md` (§3 live, §6 Step 3)
+- Limited-range communication for map sharing
+- Aerial scout + object query / detection
+- Richer assignment (e.g. information gain) and inter-robot collision awareness
 
 ## License
 
