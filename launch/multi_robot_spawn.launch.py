@@ -38,7 +38,8 @@ def generate_launch_description():
 
     number_of_robots = 3
     namespace = "TB3"
-    pose = [[-2, -0.5], [0.5, -2], [2, 0.5]]
+    # pose = [[-2, -0.5], [0.5, -2], [2, 0.5]]
+    pose = [[-2.0, -0.5], [0.0, 0.5], [1.5, 3.0]]
     model_folder = "turtlebot3_" + TURTLEBOT3_MODEL
     urdf_path = os.path.join(
         get_package_share_directory("turtlebot3_gazebo"),
@@ -56,7 +57,7 @@ def generate_launch_description():
 
     world = os.path.join(
         os.path.expanduser("~/swarm-search/worlds"),
-        "turtlebot3_world.world",
+        "turtlebot3_house.world",
     )
 
     gzserver_cmd = IncludeLaunchDescription(

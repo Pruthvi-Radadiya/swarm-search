@@ -1,20 +1,18 @@
-from rclpy.node import Node
 import rclpy
+from geometry_msgs.msg import Pose, PoseArray
 from nav_msgs.msg import OccupancyGrid
-
+from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import (
-    QoSProfile,
-    QoSReliabilityPolicy,
     QoSDurabilityPolicy,
     QoSHistoryPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
 )
-from rclpy.parameter import Parameter
-
-from geometry_msgs.msg import PoseArray, Pose
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
-MIN_CLUSTER_SIZE = 10
+MIN_CLUSTER_SIZE = 5
 
 
 class FrontierDetector(Node):
@@ -46,6 +44,9 @@ class FrontierDetector(Node):
         centroids = []
         for cluster in clusters:
             if len(cluster) < MIN_CLUSTER_SIZE:
+                self.get_logger().info(
+                    f"dropped cluster size={len(cluster)}", throttle_duration_sec=1.0
+                )
                 continue
             centroids.append(self._centroid_world(cluster, msg))
 
@@ -79,6 +80,10 @@ class FrontierDetector(Node):
                     cell(i + 1, j),
                     cell(i, j - 1),
                     cell(i, j + 1),
+                    cell(i - 1, j - 1),
+                    cell(i - 1, j + 1),
+                    cell(i + 1, j - 1),
+                    cell(i + 1, j + 1),
                 )
                 if any(n == -1 for n in neighbors):
                     cells.append((i, j))
@@ -101,7 +106,16 @@ class FrontierDetector(Node):
             while queue:
                 i, j = queue.pop()
                 cluster.append((i, j))
-                for ni, nj in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
+                for ni, nj in (
+                    (i - 1, j),
+                    (i + 1, j),
+                    (i, j - 1),
+                    (i, j + 1),
+                    (i - 1, j - 1),
+                    (i - 1, j + 1),
+                    (i + 1, j - 1),
+                    (i + 1, j + 1),
+                ):
                     nxt = (ni, nj)
                     if nxt not in visited and nxt in cells_set:
                         visited.add(nxt)
