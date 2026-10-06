@@ -19,4 +19,4 @@ docs/
 launch/tmp_sdf/
 *.bag
 frames_*.gv
-frames_*.pdf
+frames_*.pdf.vscode/
