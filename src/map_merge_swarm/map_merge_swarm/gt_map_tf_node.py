@@ -1,13 +1,13 @@
+import math
+
 import rclpy
+from gazebo_msgs.msg import ModelStates
+from geometry_msgs.msg import TransformStamped
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from gazebo_msgs.msg import ModelStates
-from tf2_ros import Buffer, TransformListener
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
-import math
-from geometry_msgs.msg import TransformStamped
-from tf2_ros import TransformBroadcaster
+from tf2_ros import Buffer, TransformBroadcaster, TransformListener
 
 ROBOTS = {
     "TB3_1": "burger_1",
@@ -54,6 +54,9 @@ class GtMapTfNode(Node):
 
         self.tf_broadcaster = TransformBroadcaster(self)
 
+        self._last_tf = {}  # ns -> (sx, sy, syaw) last accepted value
+        self._slow_since = {}  # ns -> time the robot became slow
+
     def _on_model_states(self, msg: ModelStates):
         for robot_ns, robot_name in ROBOTS.items():
             try:
@@ -90,6 +93,26 @@ class GtMapTfNode(Node):
 
             ix, iy, iyaw = se2_inverse(mx, my, myaw)
             sx, sy, syaw = se2_compose(gx, gy, gyaw, ix, iy, iyaw)
+
+            tw = msg.twist[i]
+            moving = (
+                math.hypot(tw.linear.x, tw.linear.y) > 0.02 or abs(tw.angular.z) > 0.03
+            )
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if moving:
+                self._slow_since[robot_ns] = None
+            elif self._slow_since.get(robot_ns) is None:
+                self._slow_since[robot_ns] = now
+            settled = (
+                self._slow_since.get(robot_ns) is not None
+                and now - self._slow_since[robot_ns] > 1.0
+            )
+            if settled or robot_ns not in self._last_tf:
+                self._last_tf[robot_ns] = (sx, sy, syaw)  # accept only when at rest
+            else:
+                sx, sy, syaw = self._last_tf[
+                    robot_ns
+                ]  # otherwise keep the last good one
 
             out = TransformStamped()
             out.header.stamp = self.get_clock().now().to_msg()
