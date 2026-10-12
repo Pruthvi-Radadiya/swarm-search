@@ -25,6 +25,10 @@ OCCUPIED_THRESH = 50
 CLAIM_RADIUS = 2.5  # meters; only matters if same open space
 IDLE_ESCAPE_S = 10.0
 
+BLACKLIST_RADIUS = 1.2  # meters, bigger than the 0.9 m goal-to-frontier offset
+HOLD_ABORTED_S = 60.0  # Nav2 status 6
+HOLD_CANCELLED_S = 300.0  # Nav2 status 5 (the stuck watchdog will cause these)
+
 
 class GoalAssigner(Node):
     def __init__(self):
@@ -70,6 +74,8 @@ class GoalAssigner(Node):
 
         self._clearance = None  # meters to nearest wall, same shape as the map
         self._unassigned_since = {}  # ns -> sim time it was first left without a goal
+
+        self._blacklist = []  # entries: (x, y, expires_at) in shared_map meters and sim seconds
 
     def _on_shared_map(self, msg):
         self._shared_map = msg
@@ -166,6 +172,20 @@ class GoalAssigner(Node):
                 return True
         return False
 
+    def _now(self):
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _is_blacklisted(self, x, y):
+        now = self._now()
+        self._blacklist = [
+            b for b in self._blacklist if b[2] > now
+        ]  # forget expired entries
+
+        for bx, by, expires_at in self._blacklist:
+            if math.hypot(x - bx, y - by) < BLACKLIST_RADIUS:
+                return True
+        return False
+
     def _get_robot_pose(self, robot_ns):
         t = self.tf_buffer.lookup_transform(
             "shared_map",
@@ -176,7 +196,7 @@ class GoalAssigner(Node):
 
     def _nearest_frontier_for_ns(self, frontiers, idle, min_d2, rejected):
         best = None
-        stats = {"close": 0, "claimed": 0, "rejected": 0}
+        stats = {"close": 0, "claimed": 0, "rejected": 0, "blacklisted": 0}
         for i, (ns, rx, ry) in enumerate(idle):
             for j, (fx, fy) in enumerate(frontiers):
                 d2 = (fx - rx) ** 2 + (fy - ry) ** 2
@@ -188,6 +208,9 @@ class GoalAssigner(Node):
                     continue
                 if self._frontier_claimed_by_other(fx, fy, ns):
                     stats["claimed"] += 1
+                    continue
+                if self._is_blacklisted(fx, fy):
+                    stats["blacklisted"] += 1
                     continue
                 if best is None or d2 < best[0]:
                     best = (d2, i, j)
@@ -259,11 +282,22 @@ class GoalAssigner(Node):
         )
 
     def _on_result(self, future, ns):
-        self._claims.pop(ns, None)
+        claim = self._claims.pop(ns, None)
         status = future.result().status
+        now = self._now()
+        if status != 4 and claim is not None:
+            if status == 6:
+                hold = HOLD_ABORTED_S
+            else:
+                hold = HOLD_CANCELLED_S
+            self._blacklist.append((claim[0], claim[1], now + hold))
+            self.get_logger().info(
+                f"{ns}: blacklist ({claim[0]:.2f},{claim[1]:.2f}) for {hold:.0f}s"
+            )
+
         self.get_logger().info(f"{ns}: nav finished status = {status}")
         self._busy[ns] = False
-        self._cooldown_until[ns] = self.get_clock().now().nanoseconds * 1e-9 + 3.0
+        self._cooldown_until[ns] = now + 3.0
 
     def _has_clearance(self, gx, gy, radius_m):
         cell = self._world_to_cell(gx, gy)
