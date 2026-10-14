@@ -674,18 +674,47 @@ class GoalAssigner(Node):
             sorted_frontiers = sorted(frontiers, key=sort_key)
 
             # find first valid frontier for this robot
+            # assigned = False
+            # for f_xy in sorted_frontiers:
+            #     fx, fy = f_xy
+
+            #     if (fx - rx) ** 2 + (fy - ry) ** 2 < min_d2:
+            #         continue
+            #     if self._frontier_claimed_by_other(fx, fy, ns):
+            #         continue
+            #     if self._is_blacklisted(fx, fy):
+            #         continue
+
+            #     d_self = math.hypot(fx - rx, fy - ry)
+            #     other_dists = [
+            #         math.hypot(fx - ox, fy - oy)
+            #         for o_ns, (ox, oy) in all_poses.items()
+            #         if o_ns != ns
+            #     ]
+            #     d_other = min(other_dists) if other_dists else 10.0
+            #     if d_other < 1.2 and d_self > 2.5:
+            #         continue
+
+            #     goal = self._find_goal(f_xy, (rx, ry))
+            #     if goal is None or math.hypot(goal[0] - rx, goal[1] - ry) < 0.2:
+            #         continue
+            # ===
             assigned = False
+            reasons = []
             for f_xy in sorted_frontiers:
                 fx, fy = f_xy
-
-                if (fx - rx) ** 2 + (fy - ry) ** 2 < min_d2:
+                d_self = math.hypot(fx - rx, fy - ry)
+                if d_self < MIN_GOAL_DIST:
+                    reasons.append(
+                        f"({fx:.2f},{fy:.2f}): too close ({d_self:.2f}m < {MIN_GOAL_DIST}m)"
+                    )
                     continue
                 if self._frontier_claimed_by_other(fx, fy, ns):
+                    reasons.append(f"({fx:.2f},{fy:.2f}): claimed by teammate")
                     continue
                 if self._is_blacklisted(fx, fy):
+                    reasons.append(f"({fx:.2f},{fy:.2f}): blacklisted")
                     continue
-
-                d_self = math.hypot(fx - rx, fy - ry)
                 other_dists = [
                     math.hypot(fx - ox, fy - oy)
                     for o_ns, (ox, oy) in all_poses.items()
@@ -693,10 +722,18 @@ class GoalAssigner(Node):
                 ]
                 d_other = min(other_dists) if other_dists else 10.0
                 if d_other < 1.2 and d_self > 2.5:
+                    reasons.append(f"({fx:.2f},{fy:.2f}): in teammate bubble")
                     continue
-
                 goal = self._find_goal(f_xy, (rx, ry))
-                if goal is None or math.hypot(goal[0] - rx, goal[1] - ry) < 0.2:
+                if goal is None:
+                    reasons.append(
+                        f"({fx:.2f},{fy:.2f}): _find_goal failed (no clearance/crosses wall)"
+                    )
+                    continue
+                if math.hypot(goal[0] - rx, goal[1] - ry) < 0.2:
+                    reasons.append(
+                        f"({fx:.2f},{fy:.2f}): backoff goal too close (<0.2m)"
+                    )
                     continue
 
                 # transform to robot frame
@@ -721,11 +758,22 @@ class GoalAssigner(Node):
                 assigned = True
                 break
 
+            # ====
+            # if not assigned:
+            #     self.get_logger().info(
+            #         f"{ns}: no valid frontier found this cycle",
+            #         throttle_duration_sec=2.0,
+            #     )
+            # ====
             if not assigned:
+                sample_reasons = (
+                    "; ".join(reasons[:3]) if reasons else "no frontiers in list"
+                )
                 self.get_logger().info(
-                    f"{ns}: no valid frontier found this cycle",
+                    f"{ns}: no valid frontier found ({len(sorted_frontiers)} evaluated): [{sample_reasons}]",
                     throttle_duration_sec=2.0,
                 )
+                # >>>>
                 now = self._now()
                 t0 = self._unassigned_since.setdefault(ns, now)
                 if now - t0 > IDLE_ESCAPE_S:
