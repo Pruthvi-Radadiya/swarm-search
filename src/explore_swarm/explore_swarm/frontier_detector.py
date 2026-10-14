@@ -12,7 +12,7 @@ from rclpy.qos import (
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
-MIN_CLUSTER_SIZE = 7
+MIN_CLUSTER_SIZE = 9
 
 
 class FrontierDetector(Node):

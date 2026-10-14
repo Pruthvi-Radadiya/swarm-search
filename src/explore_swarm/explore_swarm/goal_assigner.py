@@ -91,6 +91,9 @@ class GoalAssigner(Node):
         self._visit_counts = {}  # (x, y) -> count of completed visits
         self.create_timer(5.0, self._watchdog)
 
+        self._redirect_goal = {}  # ns -> (pose_robot, goal) to send after cancel
+        self._last_redirect = {}  # ns -> sim_time of last redirect (prevents thrashing)
+
     def _on_shared_map(self, msg):
         self._shared_map = msg
         grid = np.array(msg.data, dtype=np.int8).reshape(
@@ -314,6 +317,15 @@ class GoalAssigner(Node):
 
         status = future.result().status
         now = self._now()
+
+        new_goal = self._redirect_goal.pop(ns, None)
+        if new_goal is not None:
+            pose_robot, goal_xy = new_goal
+            self.get_logger().info(
+                f"{ns}: redirect executing new goal ({goal_xy[0]:.2f},{goal_xy[1]:.2f})"
+            )
+            self._send_goal(ns, pose_robot, goal_xy)
+            return
 
         if status == 4:
             self._stuck_count[ns] = 0
@@ -542,6 +554,60 @@ class GoalAssigner(Node):
         if not msg.poses:
             return
 
+        frontiers = [(p.position.x, p.position.y) for p in msg.poses]
+        now = self._now()
+
+        for ns in self.robot_namespaces:
+            if not self._busy.get(ns, False):
+                continue
+            if ns in self._redirect_goal:
+                continue  # already redirecting
+            if now - self._last_redirect.get(ns, 0.0) < 10.0:
+                continue  # don't redirect too often
+
+            current_claim = self._claims.get(ns)
+            handle = self._goal_handles.get(ns)
+            if handle is None or current_claim is None:
+                continue
+            try:
+                rx, ry = self._get_robot_pose(ns)
+            except Exception:
+                continue
+
+            d_current = math.hypot(current_claim[0] - rx, current_claim[1] - ry)
+            if d_current < 3.0:
+                continue  # close enough to current goal, don't redirect
+
+            for f_xy in frontiers:
+                fx, fy = f_xy
+                d_new = math.hypot(fx - rx, fy - ry)
+                if d_new >= 1.5:
+                    continue
+                if self._line_crosses_occupied(rx, ry, fx, fy):
+                    continue
+                if self._is_blacklisted(fx, fy):
+                    continue
+                if self._frontier_claimed_by_other(fx, fy, ns):
+                    continue
+
+                goal = self._find_goal(f_xy, (rx, ry))
+                if goal is None or math.hypot(goal[0] - rx, goal[1] - ry) < 0.2:
+                    continue
+
+                try:
+                    pose_robot = self._transform_pose_to_robot_frame(goal, ns)
+                except Exception:
+                    continue
+
+                self.get_logger().info(
+                    f"{ns}: REDIRECT! Local frontier ({fx:.2f},{fy:.2f}) is {d_new:.1f}m away (cancelling {d_current:.1f}m goal)"
+                )
+                self._last_redirect[ns] = now
+                self._redirect_goal[ns] = (pose_robot, goal)
+                handle.cancel_goal_async()
+                frontiers.remove(f_xy)
+                break
+
         idle = []
         for ns in self.robot_namespaces:
             if not self._is_idle(ns):
@@ -559,7 +625,6 @@ class GoalAssigner(Node):
         if not idle:
             return
 
-        frontiers = [(p.position.x, p.position.y) for p in msg.poses]
         min_d2 = MIN_GOAL_DIST**2
         rejected = {
             ns: set() for ns in self.robot_namespaces
