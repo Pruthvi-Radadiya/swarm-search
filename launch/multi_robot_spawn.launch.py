@@ -20,7 +20,6 @@ import os
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
 from launch.actions import (
     GroupAction,
     IncludeLaunchDescription,
@@ -32,6 +31,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import PushRosNamespace
 
+from launch import LaunchDescription
+
 
 def generate_launch_description():
     TURTLEBOT3_MODEL = os.environ["TURTLEBOT3_MODEL"]
@@ -39,7 +40,8 @@ def generate_launch_description():
     number_of_robots = 3
     namespace = "TB3"
     # pose = [[-2, -0.5], [0.5, -2], [2, 0.5]]
-    pose = [[-2.0, -0.5], [0.0, 0.5], [1.5, 3.0]]
+    # pose = [[-2.0, -0.5], [0.0, 0.5], [1.5, 3.0]]
+    pose = [[0.5, -2.0], [0.0, 0.5], [1.5, 3.0]]
     model_folder = "turtlebot3_" + TURTLEBOT3_MODEL
     urdf_path = os.path.join(
         get_package_share_directory("turtlebot3_gazebo"),

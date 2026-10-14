@@ -19,15 +19,23 @@ from scipy import ndimage
 from tf2_geometry_msgs import do_transform_pose
 from tf2_ros import Buffer, TransformListener
 
-MIN_GOAL_DIST = 1.0  # meters
+MIN_GOAL_DIST = 0.5  # meters
 OCCUPIED_THRESH = 50
 
-CLAIM_RADIUS = 2.5  # meters; only matters if same open space
+CLAIM_RADIUS = 1.2  # meters; only matters if same open space
 IDLE_ESCAPE_S = 10.0
 
-BLACKLIST_RADIUS = 1.2  # meters, bigger than the 0.9 m goal-to-frontier offset
+BLACKLIST_RADIUS = 0.6  # meters, bigger than the 0.9 m goal-to-frontier offset
 HOLD_ABORTED_S = 60.0  # Nav2 status 6
-HOLD_CANCELLED_S = 300.0  # Nav2 status 5 (the stuck watchdog will cause these)
+HOLD_CANCELLED_S = 90.0  # Nav2 status 5 (the stuck watchdog will cause these)
+
+STUCK_S = 20.0
+STUCK_MOVE_M = 0.3
+MAX_STUCK_COUNT = 3
+
+GAP_PENALTY = 1.0  # meters; penalty for crossing into an unmapped blob
+DISPERSE_W = 0.5  # weight: how strongly robots push away from each other
+DISPERSE_RANGE = 6.0  # max distance to consider teammate repulsion
 
 
 class GoalAssigner(Node):
@@ -76,6 +84,12 @@ class GoalAssigner(Node):
         self._unassigned_since = {}  # ns -> sim time it was first left without a goal
 
         self._blacklist = []  # entries: (x, y, expires_at) in shared_map meters and sim seconds
+
+        self._goal_handles = {}  # ns -> active goal handle
+        self._last_move = {}  # ns -> (x, y, time_s) when it last made progress
+        self._stuck_count = {}  # ns -> how many times it has been stuck in a row
+        self._visit_counts = {}  # (x, y) -> count of completed visits
+        self.create_timer(5.0, self._watchdog)
 
     def _on_shared_map(self, msg):
         self._shared_map = msg
@@ -251,7 +265,11 @@ class GoalAssigner(Node):
         return pose_robot
 
     def _is_idle(self, ns):
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now = self._now()
+        if self._stuck_count.get(ns, 0) >= MAX_STUCK_COUNT:
+            if now < self._cooldown_until.get(ns, 0.0):
+                return False
+            self._stuck_count[ns] = 0
         return (not self._busy[ns]) and (now >= self._cooldown_until[ns])
 
     def _send_goal(self, ns, pose_robot, claim_xy):
@@ -276,6 +294,13 @@ class GoalAssigner(Node):
             self._claims.pop(ns, None)
             return
         self.get_logger().info(f"{ns}: goal accepted")
+        self._goal_handles[ns] = goal_handle
+        try:
+            rx, ry = self._get_robot_pose(ns)
+            self._last_move[ns] = (rx, ry, self._now())
+        except Exception:
+            self._last_move[ns] = None
+
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
             lambda future, robot=ns: self._on_result(future, robot)
@@ -283,8 +308,42 @@ class GoalAssigner(Node):
 
     def _on_result(self, future, ns):
         claim = self._claims.pop(ns, None)
+
+        self._goal_handles.pop(ns, None)
+        self._last_move.pop(ns, None)
+
         status = future.result().status
         now = self._now()
+
+        if status == 4:
+            self._stuck_count[ns] = 0
+            if claim is not None:
+                cx, cy = claim
+
+                # Check if we already visited this frontier before (within 0.8m)
+                matching_entry = None
+                for (vx, vy), count in self._visit_counts.items():
+                    if math.hypot(cx - vx, cy - vy) < 0.8:
+                        matching_entry = (vx, vy)
+                        break
+
+                if matching_entry is None:
+                    # Attempt 1: First visit. Give a 60s cooldown so others don't rush here.
+                    self._visit_counts[(cx, cy)] = 1
+                    self._blacklist.append((cx, cy, now + 60.0))
+                else:
+                    count = self._visit_counts[matching_entry] + 1
+                    self._visit_counts[matching_entry] = count
+                    if count >= 2:
+                        # Attempt 2 finished: It's an unreachable shadow (trash can/pillar)!
+                        # Blacklist permanently for 10 minutes (600s)!
+                        self._blacklist.append((cx, cy, now + 600.0))
+                        self.get_logger().info(
+                            f"{ns}: frontier at ({cx:.2f},{cy:.2f}) visited {count} times without clearing. Blacklisting 600s!"
+                        )
+                    else:
+                        self._blacklist.append((cx, cy, now + 60.0))
+
         if status != 4 and claim is not None:
             if status == 6:
                 hold = HOLD_ABORTED_S
@@ -297,7 +356,7 @@ class GoalAssigner(Node):
 
         self.get_logger().info(f"{ns}: nav finished status = {status}")
         self._busy[ns] = False
-        self._cooldown_until[ns] = now + 3.0
+        self._cooldown_until[ns] = now + 0.1
 
     def _has_clearance(self, gx, gy, radius_m):
         cell = self._world_to_cell(gx, gy)
@@ -328,11 +387,15 @@ class GoalAssigner(Node):
                 "reject: too close to obstacle", throttle_duration_sec=1.0
             )
             return False
-        if not self._reachable_via_free(robot_xy, goal_xy):
-            self.get_logger().info(
-                "reject: no known free route", throttle_duration_sec=1.0
-            )
-            return False
+
+        # NOTE: Do not reject goals across unmapped doorways with _reachable_via_free!
+        # Pattern 5 sort_key already explores local room first.
+        # Once local room is done, Nav2 (with allow_unknown: true) will route through doors.
+        # if not self._reachable_via_free(robot_xy, goal_xy):
+        #     self.get_logger().info(
+        #         "reject: no known free route", throttle_duration_sec=1.0
+        #     )
+        #     return False
         return True
 
     def _goal_candidates(self, frontier_xy, robot_xy):
@@ -363,7 +426,7 @@ class GoalAssigner(Node):
 
     def _find_goal(self, frontier_xy, robot_xy):
         cands = self._goal_candidates(frontier_xy, robot_xy)
-        for clearance in (0.3, 0.2):  # strict first, relaxed for narrow spots
+        for clearance in (0.32, 0.22):  # strict first, relaxed for narrow spots
             for cand in cands:
                 if self._is_goal_valid(frontier_xy, cand, robot_xy, clearance):
                     return cand
@@ -390,20 +453,38 @@ class GoalAssigner(Node):
         my_labels = list(self._labels_near(rc))
         if not my_labels:
             return None
-        mask = (
-            np.isin(labels, my_labels)
-            & (clear >= min_clear_m)
-            & (dist >= min_move_m)
-            & (dist <= radius_m)
-        )
-        if not mask.any():
-            return None
-        k = np.unravel_index(np.argmax(np.where(mask, clear, -1.0)), clear.shape)
-        gi, gj = i0 + k[1], j0 + k[0]
-        return (
-            info.origin.position.x + (gi + 0.5) * res,
-            info.origin.position.y + (gj + 0.5) * res,
-        )
+
+        for c_thresh in (min_clear_m, 0.18):  # strict first, then relaxed
+            mask = (
+                np.isin(labels, my_labels)
+                & (clear >= c_thresh)
+                & (dist >= min_move_m)
+                & (dist <= radius_m)
+            )
+            if not mask.any():
+                continue
+
+            # Sort candidate cells by clearance (highest clearance first)
+            cand_indices = np.argwhere(mask)
+            cand_indices = sorted(
+                cand_indices, key=lambda idx: clear[idx[0], idx[1]], reverse=True
+            )
+
+            for cj, ci in cand_indices:
+                gx = info.origin.position.x + (i0 + ci + 0.5) * res
+                gy = info.origin.position.y + (j0 + cj + 0.5) * res
+
+                if self._is_blacklisted(gx, gy):
+                    continue
+
+                if any(
+                    math.hypot(gx - cx, gy - cy) < CLAIM_RADIUS
+                    for cx, cy in self._claims.values()
+                ):
+                    continue
+                return (gx, gy)
+
+        return None
 
     def _try_escape(self, ns, rx, ry):
         goal = self._escape_goal(rx, ry)
@@ -419,6 +500,43 @@ class GoalAssigner(Node):
             return
         self.get_logger().info(f"{ns}: escape goal ({goal[0]:.2f},{goal[1]:.2f})")
         self._send_goal(ns, pose_robot, goal)
+
+    def _watchdog(self):
+        now = self._now()
+        for ns in self.robot_namespaces:
+            if not self._busy.get(ns, False):
+                continue
+            handle = self._goal_handles.get(ns)
+            if handle is None:
+                continue
+
+            last_data = self._last_move.get(ns)
+            if last_data is None:
+                try:
+                    rx, ry = self._get_robot_pose(ns)
+                    self._last_move[ns] = (rx, ry, now)
+                except Exception:
+                    pass
+                continue
+            last_x, last_y, last_time = last_data
+
+            try:
+                rx, ry = self._get_robot_pose(ns)
+            except Exception:
+                continue
+
+            distance_moved = math.hypot(rx - last_x, ry - last_y)
+            if distance_moved >= STUCK_MOVE_M:
+                self._last_move[ns] = (rx, ry, now)
+
+            elif now - last_time > STUCK_S:
+                count = self._stuck_count.get(ns, 0) + 1
+                self._stuck_count[ns] = count
+                self.get_logger().warn(
+                    f"{ns}: STUCK! No progress for {STUCK_S:.0f}s (streak: {count}). Cancelling goal..."
+                )
+                handle.cancel_goal_async()
+                self._goal_handles.pop(ns, None)
 
     def _on_frontier(self, msg: PoseArray):
         if not msg.poses:
@@ -447,51 +565,107 @@ class GoalAssigner(Node):
             ns: set() for ns in self.robot_namespaces
         }  # per robot, this callback only
 
-        while idle and frontiers:
-            best = self._nearest_frontier_for_ns(frontiers, idle, min_d2, rejected)
-            if best is None:
+        all_poses = {}
+        for r_name in self.robot_namespaces:
+            try:
+                all_poses[r_name] = self._get_robot_pose(r_name)
+            except Exception:
+                pass
+
+        for ns, rx, ry in idle:
+            if not frontiers:
                 break
 
-            _, i, j = best
-            ns, rx, ry = idle.pop(i)
-            frontier_xy = frontiers.pop(j)
+            # sort robots by distance to this robot
+            #  (Optional bonus: sort by (not own_room, distance) so local frontiers come first)
 
-            goal = self._find_goal(frontier_xy, (rx, ry))
-            if goal is None or math.hypot(goal[0] - rx, goal[1] - ry) < 0.5:
-                rejected[ns].add(frontier_xy)  # only this robot skips it
-                frontiers.append(frontier_xy)  # teammates may still take it
-                idle.append((ns, rx, ry))
-                continue
+            rc = self._world_to_cell(rx, ry)
+            robot_labels = self._labels_near(rc) if rc else set()
 
-            try:
-                pose_robot = self._transform_pose_to_robot_frame(goal, ns)
-            except Exception as e:
-                self.get_logger().warn(
-                    f"{ns}: TF failed: {e}", throttle_duration_sec=2.0
+            def sort_key(f):
+                fx, fy = f
+                d_self = math.hypot(fx - rx, fy - ry)
+
+                fc = self._world_to_cell(fx, fy)
+                f_labels = self._labels_near(fc) if fc else set()
+                same_blob = bool(robot_labels & f_labels)
+                gap_cost = 0.0 if same_blob else GAP_PENALTY
+                # Penalty if straight line crosses a wall (forces robot to finish its own room first)
+                wall_cost = 2.5 if self._line_crosses_occupied(rx, ry, fx, fy) else 0.0
+
+                # Only penalize if another robot is already close to this frontier (< 2.5m)
+                other_dists = [
+                    math.hypot(fx - ox, fy - oy)
+                    for o_ns, (ox, oy) in all_poses.items()
+                    if o_ns != ns
+                ]
+                d_other = min(other_dists) if other_dists else 10.0
+
+                # Positive penalty: steers robots away from where teammates are working
+                teammate_penalty = max(0.0, 2.5 - d_other) * 2.0
+
+                return d_self + gap_cost + wall_cost + teammate_penalty
+
+            sorted_frontiers = sorted(frontiers, key=sort_key)
+
+            # find first valid frontier for this robot
+            assigned = False
+            for f_xy in sorted_frontiers:
+                fx, fy = f_xy
+
+                if (fx - rx) ** 2 + (fy - ry) ** 2 < min_d2:
+                    continue
+                if self._frontier_claimed_by_other(fx, fy, ns):
+                    continue
+                if self._is_blacklisted(fx, fy):
+                    continue
+
+                d_self = math.hypot(fx - rx, fy - ry)
+                other_dists = [
+                    math.hypot(fx - ox, fy - oy)
+                    for o_ns, (ox, oy) in all_poses.items()
+                    if o_ns != ns
+                ]
+                d_other = min(other_dists) if other_dists else 10.0
+                if d_other < 1.2 and d_self > 2.5:
+                    continue
+
+                goal = self._find_goal(f_xy, (rx, ry))
+                if goal is None or math.hypot(goal[0] - rx, goal[1] - ry) < 0.2:
+                    continue
+
+                # transform to robot frame
+                try:
+                    pose_robot = self._transform_pose_to_robot_frame(goal, ns)
+                except Exception as e:
+                    self.get_logger().warn(
+                        f"{ns}: TF failed: {e}", throttle_duration_sec=2.0
+                    )
+                    continue
+
+                if not self._nav_clients[ns].wait_for_server(timeout_sec=0.0):
+                    self.get_logger().warn(
+                        f"{ns}: Nav2 not ready", throttle_duration_sec=2.0
+                    )
+                    continue
+
+                self.get_logger().info(f"assign {ns} -> frontier ({fx:.2f},{fy:.2f})")
+                self._send_goal(ns, pose_robot, goal)
+                self._unassigned_since.pop(ns, None)
+                frontiers.remove(f_xy)
+                assigned = True
+                break
+
+            if not assigned:
+                self.get_logger().info(
+                    f"{ns}: no valid frontier found this cycle",
+                    throttle_duration_sec=2.0,
                 )
-                frontiers.append(frontier_xy)  # robot is not put back
-                continue
-
-            if not self._nav_clients[ns].wait_for_server(timeout_sec=0.0):
-                self.get_logger().warn(
-                    f"{ns}: Nav2 not ready", throttle_duration_sec=2.0
-                )
-                frontiers.append(frontier_xy)  # robot is not put back
-                continue
-
-            self.get_logger().info(
-                f"assign {ns} -> frontier {frontier_xy}", throttle_duration_sec=1.0
-            )
-            self._send_goal(ns, pose_robot, goal)
-            self._unassigned_since.pop(ns, None)
-
-        # robots still in idle got nothing this round
-        now = self.get_clock().now().nanoseconds * 1e-9
-        for ns, rx, ry in idle:
-            t0 = self._unassigned_since.setdefault(ns, now)
-            if now - t0 > IDLE_ESCAPE_S:
-                self._try_escape(ns, rx, ry)
-                self._unassigned_since[ns] = now
+                now = self._now()
+                t0 = self._unassigned_since.setdefault(ns, now)
+                if now - t0 > IDLE_ESCAPE_S:
+                    self._try_escape(ns, rx, ry)
+                    self._unassigned_since[ns] = now
 
 
 def main(args=None):
