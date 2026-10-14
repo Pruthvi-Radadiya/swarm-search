@@ -17,9 +17,7 @@ Coverage of the environment is tracked and logged over time for quantitative ben
   3. **Progressive Blacklisting & Retry Budget**: Distinguishes transient aborts (60s hold) from permanent unreachable obstacle shadows (2-visit threshold blacklists unreachable points for 600s).
   4. **Active Watchdog & Escape Recoveries**: Detects kinematic stalls ($< 0.3\text{m}$ movement over 20s) and idle robots (10s without valid frontiers), issuing clearance-ranked escape nudges into open space.
   5. **Soft-Cost Ranking & Room Dispersion**:
-     $$
-     \text{Cost}(f) = d_{\text{self}} + \text{gap\_cost} + \text{wall\_cost} + \text{disperse\_penalty}
-     $$
+     $$\text{Cost}(f) = d_{\text{self}} + \text{gap\\_cost} + \text{wall\\_cost} + \text{disperse\\_penalty}$$
      Biases robots to systematically explore their current room before transitioning through doorways, while repelling robots away from teammates with a $1.2\text{m}$ personal bubble.
   7. **In-Flight Redirection**: Dynamically re-assigns robots that are en route to distant rooms ($> 3.0\text{m}$) if closer local frontiers ($\le 1.5\text{m}$) appear nearby, with 10s hysteresis to eliminate thrashing.
 - **Smooth Hallway & Corner Traversal**: Costmaps tuned with `cost_scaling_factor: 3.0` and Regulated Pure Pursuit (RPP) to center robots down hallways and eliminate corner-clipping on 90° interior walls.
