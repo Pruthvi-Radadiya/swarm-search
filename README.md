@@ -1,5 +1,11 @@
 # Swarm Search — Autonomous Multi-Robot Search & Rescue (ROS 2 Humble)
 
+[![LinkedIn Demo Video](https://img.shields.io/badge/LinkedIn-Watch_3--Robot_Demo_Video-0A66C2?style=for-the-badge&logo=linkedin)](https://lnkd.in/p/exMaFqmE)
+[![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-22314E?style=for-the-badge&logo=ros)](https://docs.ros.org/en/humble/)
+[![Gazebo Classic](https://img.shields.io/badge/Gazebo-Classic_11-F58220?style=for-the-badge)](http://gazebosim.org/)
+
+> 🎬 **Demonstration Video**: [Watch 3 autonomous TurtleBots map the house world concurrently on LinkedIn](https://lnkd.in/p/exMaFqmE).
+
 Autonomous indoor multi-robot exploration in Gazebo Classic: **three TurtleBot3 Burgers** concurrently run online SLAM and Nav2, merge local laser scans into a unified real-time team occupancy grid (`/shared_map`), and **autonomously map complex multi-room environments** (`turtlebot3_house`) using cluster-based frontier detection and intelligent coordinated goal assignment.
 
 Coverage of the environment is tracked and logged over time for quantitative benchmarking.
@@ -17,12 +23,9 @@ Coverage of the environment is tracked and logged over time for quantitative ben
   3. **Progressive Blacklisting & Retry Budget**: Distinguishes transient aborts (60s hold) from permanent unreachable obstacle shadows (2-visit threshold blacklists unreachable points for 600s).
   4. **Active Watchdog & Escape Recoveries**: Detects kinematic stalls ($< 0.3\text{m}$ movement over 20s) and idle robots (10s without valid frontiers), issuing clearance-ranked escape nudges into open space.
   5. **Soft-Cost Ranking & Room Dispersion**:
-
-        $$\text{Cost}(f) = d_{\text{self}} + \text{gap\\_cost} + \text{wall\\_cost} + \text{disperse\\_penalty}$$
-
-        Biases robots to systematically explore their current room before transitioning through doorways, while repelling robots away from teammates with a                 $1.2\text{     m}$ personal bubble.
-  
-  7. **In-Flight Redirection**: Dynamically re-assigns robots that are en route to distant rooms ($> 3.0\text{m}$) if closer local frontiers ($\le 1.5\text{m}$) appear nearby, with 10s hysteresis to eliminate thrashing.
+     $$\text{Cost}(f) = d_{\text{self}} + \text{gap\_cost} + \text{wall\_cost} + \text{disperse\_penalty}$$
+     Biases robots to systematically explore their current room before transitioning through doorways, while repelling robots away from teammates with a $1.2\text{m}$ personal bubble.
+  6. **In-Flight Redirection**: Dynamically re-assigns robots that are en route to distant rooms ($> 3.0\text{m}$) if closer local frontiers ($\le 1.5\text{m}$) appear nearby, with 10s hysteresis to eliminate thrashing.
 - **Smooth Hallway & Corner Traversal**: Costmaps tuned with `cost_scaling_factor: 3.0` and Regulated Pure Pursuit (RPP) to center robots down hallways and eliminate corner-clipping on 90° interior walls.
 
 ---
@@ -101,6 +104,31 @@ source install/setup.bash
 ---
 
 ## Running Autonomous Swarm Exploration
+
+You can run the full system using either the **automated one-click bringup script** (recommended) or the manual 10-terminal workflow.
+
+### Quick Start: Automated Bringup (Recommended)
+
+1. **Launch simulation, 3× SLAM, 3× Nav2, and Map Fusion**:
+   ```bash
+   cd ~/swarm-search
+   ./start_sim.sh
+   ```
+2. **In a second terminal, open RViz2**:
+   ```bash
+   ros2 run rviz2 rviz2 --ros-args -p use_sim_time:=true
+   ```
+   *Display topics:* Fixed Frame: `shared_map`, Map: `/shared_map`, MarkerArray: `/frontiers_markers`.
+3. **In a third terminal, start autonomous exploration**:
+   ```bash
+   source /opt/ros/humble/setup.bash
+   source ~/swarm-search/install/setup.bash
+   ros2 launch explore_swarm explore.launch.py
+   ```
+
+---
+
+### Alternative: Manual Multi-Terminal Workflow (T0–T9)
 
 Launch the system across terminals **T0–T9**. In each terminal, first source the environment:
 ```bash
