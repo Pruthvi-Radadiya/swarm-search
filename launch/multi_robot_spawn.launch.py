@@ -29,7 +29,7 @@ from launch.actions import (
 from launch.event_handlers import OnShutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import PushRosNamespace
+from launch_ros.actions import Node, PushRosNamespace
 
 from launch import LaunchDescription
 
@@ -44,7 +44,7 @@ def generate_launch_description():
     pose = [[0.5, -2.0], [-0.3, 0.4], [1.5, 1.5]]
     model_folder = "turtlebot3_" + TURTLEBOT3_MODEL
     urdf_path = os.path.join(
-        get_package_share_directory("turtlebot3_gazebo"),
+        os.path.expanduser("~/swarm-search"),
         "models",
         model_folder,
         "model.sdf",
@@ -95,12 +95,23 @@ def generate_launch_description():
     for count in range(number_of_robots):
         tree = ET.parse(urdf_path)
         root = tree.getroot()
+
         for odom_frame_tag in root.iter("odometry_frame"):
             odom_frame_tag.text = f"{namespace}_{count + 1}/odom"
         for base_frame_tag in root.iter("robot_base_frame"):
             base_frame_tag.text = f"{namespace}_{count + 1}/base_footprint"
         for scan_frame_tag in root.iter("frame_name"):
-            scan_frame_tag.text = f"{namespace}_{count + 1}/base_scan"
+            if "scan" in scan_frame_tag.text:
+                scan_frame_tag.text = f"{namespace}_{count + 1}/base_scan"
+            elif "camera" in scan_frame_tag.text:
+                scan_frame_tag.text = f"{namespace}_{count + 1}/camera_link"
+
+        for plugin_tag in root.iter("plugin"):
+            if plugin_tag.get("name") == "camera_controller":
+                ns_tag = plugin_tag.find("./ros/namespace")
+                if ns_tag is not None:
+                    ns_tag.text = f"{namespace}_{count + 1}"
+
         urdf_modified = ET.tostring(tree.getroot(), encoding="unicode")
         urdf_modified = '<?xml version="1.0" ?>\n' + urdf_modified
         with open(f"{save_path}{count + 1}.sdf", "w") as file:
@@ -139,12 +150,37 @@ def generate_launch_description():
     # Spawning immediately races and fails with "GazeboRosFactory?" — delay robots.
     robot_actions = []
     for count, spawn_turtlebot_cmd in enumerate(spawn_turtlebot_cmd_list, start=1):
+        static_cam_tf = Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name=f"cam_tf_publisher_{count}",
+            arguments=[
+                "--x",
+                "0.073",
+                "--y",
+                "0.0",
+                "--z",
+                "0.115",
+                "--roll",
+                "0.0",
+                "--pitch",
+                "0.0",
+                "--yaw",
+                "0.0",
+                "--frame-id",
+                f"{namespace}_{count}/base_link",
+                "--child-frame-id",
+                f"{namespace}_{count}/camera_link",
+            ],
+            parameters=[{"use_sim_time": True}],
+        )
         robot_actions.append(
             GroupAction(
                 [
                     PushRosNamespace(f"{namespace}_{count}"),
                     robot_state_publisher_cmd_list[count - 1],
                     spawn_turtlebot_cmd,
+                    static_cam_tf,
                 ]
             )
         )
