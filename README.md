@@ -1,4 +1,4 @@
-# Swarm Search — Autonomous Multi-Robot Search & Rescue (ROS 2 Humble)
+# Swarm Search: Autonomous Multi-Robot Search & Rescue (ROS 2 Humble)
 
 [![LinkedIn Demo Video](https://img.shields.io/badge/LinkedIn-Watch_3--Robot_Demo_Video-0A66C2?style=for-the-badge&logo=linkedin)](https://lnkd.in/p/exMaFqmE)
 [![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-22314E?style=for-the-badge&logo=ros)](https://docs.ros.org/en/humble/)
