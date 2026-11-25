@@ -1,0 +1,157 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="quadrotor">
+    <static>false</static>
+
+    <!-- Main Chassis Link -->
+    <link name="base_link">
+      <pose>0 0 0 0 0 0</pose>
+      <gravity>0</gravity> <!-- Intrinsic hover stability: eliminates gravity drop -->
+
+      <inertial>
+        <mass>1.5</mass>
+        <inertia>
+          <ixx>0.0347563</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.0458929</iyy>
+          <iyz>0</iyz>
+          <izz>0.0977</izz>
+        </inertia>
+      </inertial>
+
+      <!-- Center Body Visual -->
+      <visual name="body_visual">
+        <geometry>
+          <box>
+            <size>0.25 0.25 0.08</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.1 0.1 1.0</ambient> <!-- Red center body -->
+          <diffuse>0.8 0.1 0.1 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- Arm 1 Visual (X-axis) -->
+      <visual name="arm_x">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.48 0.03 0.015</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1.0</ambient>
+          <diffuse>0.2 0.2 0.2 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- Arm 2 Visual (Y-axis) -->
+      <visual name="arm_y">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.03 0.48 0.015</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1.0</ambient>
+          <diffuse>0.2 0.2 0.2 1.0</diffuse>
+        </material>
+      </visual>
+
+      <!-- 4 Rotor Visuals -->
+      <visual name="rotor_0">
+        <pose>0.22 0 0.02 0 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.005</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 0.7</ambient></material>
+      </visual>
+      <visual name="rotor_1">
+        <pose>-0.22 0 0.02 0 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.005</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 0.7</ambient></material>
+      </visual>
+      <visual name="rotor_2">
+        <pose>0 0.22 0.02 0 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.005</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 0.7</ambient></material>
+      </visual>
+      <visual name="rotor_3">
+        <pose>0 -0.22 0.02 0 0 0</pose>
+        <geometry><cylinder><radius>0.08</radius><length>0.005</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 0.7</ambient></material>
+      </visual>
+
+      <!-- Collision Shape -->
+      <collision name="body_collision">
+        <geometry>
+          <box>
+            <size>0.40 0.40 0.10</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <!-- ============================================== -->
+      <!-- Downward RGB Camera Sensor                     -->
+      <!-- ============================================== -->
+      <sensor name="downward_camera" type="camera">
+        <!-- Pitched down by 90 deg (1.570796 rad) -->
+        <pose>0 0 -0.05 0 1.570796 0</pose>
+        <always_on>true</always_on>
+        <update_rate>5.0</update_rate>
+        <camera>
+          <horizontal_fov>1.396263</horizontal_fov> <!-- 80 deg FOV -->
+          <image>
+            <width>320</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>10.0</far>
+          </clip>
+        </camera>
+        <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>drone</namespace>
+            <remapping>image_raw:=camera/image_raw</remapping>
+            <remapping>camera_info:=camera/camera_info</remapping>
+          </ros>
+          <camera_name>camera</camera_name>
+          <frame_name>drone/camera_link</frame_name>
+        </plugin>
+      </sensor>
+    </link>
+
+    <!-- ============================================== -->
+    <!-- Planar Velocity Controller (cmd_vel)           -->
+    <!-- ============================================== -->
+    <plugin name="drone_planar_move" filename="libgazebo_ros_planar_move.so">
+      <ros>
+        <namespace>drone</namespace>
+        <remapping>cmd_vel:=cmd_vel</remapping>
+        <remapping>odom:=odom_planar</remapping>
+      </ros>
+      <update_rate>30.0</update_rate>
+      <robot_base_frame>base_link</robot_base_frame>
+    </plugin>
+
+    <!-- ============================================== -->
+    <!-- 3D Odometry & Transform Broadcaster (P3D)      -->
+    <!-- ============================================== -->
+    <plugin name="p3d_base_controller" filename="libgazebo_ros_p3d.so">
+      <ros>
+        <namespace>drone</namespace>
+        <remapping>odom:=odom</remapping>
+      </ros>
+      <body_name>base_link</body_name>
+      <frame_name>shared_map</frame_name>
+      <update_rate>20.0</update_rate>
+      <xyz_offset>0 0 0</xyz_offset>
+      <rpy_offset>0 0 0</rpy_offset>
+      <gaussian_noise>0.001</gaussian_noise>
+    </plugin>
+
+  </model>
+</sdf>

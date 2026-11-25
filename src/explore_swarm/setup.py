@@ -32,6 +32,8 @@ setup(
         "console_scripts": [
             "frontier_detector = explore_swarm.frontier_detector:main",
             "goal_assigner = explore_swarm.goal_assigner:main",
+            "px4_teleop = explore_swarm.px4_teleop:main",
+            "aerial_scout_node = explore_swarm.aerial_scout_node:main",
         ],
     },
 )

@@ -35,7 +35,7 @@ from launch import LaunchDescription
 
 
 def generate_launch_description():
-    TURTLEBOT3_MODEL = os.environ["TURTLEBOT3_MODEL"]
+    TURTLEBOT3_MODEL = "burger"
 
     number_of_robots = 3
     namespace = "TB3"

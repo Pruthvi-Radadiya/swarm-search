@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version='1.9'>
+  <model name='x500_downward_cam'>
+    <!-- 1. Include the stock PX4 x500 quadrotor frame -->
+    <include merge='true'>
+      <uri>x500</uri>
+    </include>
+
+    <!-- 2. Create a physical link for the downward camera -->
+    <link name="camera_downward_link">
+      <!-- Mounted 5cm below drone body, rotated 90 deg down (pitch = 1.5708 rad) -->
+      <pose relative_to="base_link">0 0 -0.05 0 1.57079632679 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00001</izz>
+        </inertia>
+      </inertial>
+      
+      <!-- 3. The Camera Sensor plugin -->
+      <sensor name="camera_downward" type="camera">
+        <always_on>true</always_on>
+        <update_rate>5.0</update_rate>
+        <topic>/camera</topic>
+        <camera>
+          <horizontal_fov>1.085</horizontal_fov>
+          <image>
+            <width>320</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>10.0</far>
+          </clip>
+        </camera>
+      </sensor>
+    </link>
+
+    <!-- 4. Rigid joint bolting camera link to drone base_link -->
+    <joint name="camera_downward_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>camera_downward_link</child>
+    </joint>
+  </model>
+</sdf>
