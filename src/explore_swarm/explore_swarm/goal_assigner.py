@@ -51,6 +51,17 @@ class GoalAssigner(Node):
         self.create_subscription(PoseArray, "/frontiers", self._on_frontier, 10)
         self.get_logger().info("goal_assigner listening on /frontiers")
 
+        self.create_subscription(
+            PoseArray, "/candidate_pins", self._on_candidate_pins, 10
+        )
+        self.get_logger().info(
+            "goal_assigner listening on /candidate_pins (Aerial Drone Scout)"
+        )
+
+        self._candidate_pins = []  # Active pins: [(x, y), ...]
+        self._cleared_pins = set()  # Set of cleared (x, y) pins
+        self._rover_pin_claims = {}  # robot_ns -> (x, y) pin
+
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.robot_namespaces = ["TB3_1", "TB3_2", "TB3_3"]
@@ -106,6 +117,31 @@ class GoalAssigner(Node):
         self._clearance = (
             ndimage.distance_transform_edt(~occupied) * msg.info.resolution
         )
+
+    def _on_candidate_pins(self, msg: PoseArray):
+        """Receives target pins spotted by the aerial scout drone."""
+        for pose in msg.poses:
+            pin = (round(pose.position.x, 2), round(pose.position.y, 2))
+            if pin not in self._cleared_pins and pin not in self._candidate_pins:
+                self._candidate_pins.append(pin)
+                self.get_logger().info(
+                    f"🎯 [ASSIGNER] New aerial candidate pin received at {pin}! Active queue: {len(self._candidate_pins)}"
+                )
+
+    def _check_pin_clearance(self, ns, rx, ry):
+        """Checks if a rover arrived within 0.8m of its claimed candidate pin."""
+        if ns not in self._rover_pin_claims:
+            return
+        px, py = self._rover_pin_claims[ns]
+        dist = math.hypot(rx - px, ry - py)
+        if dist <= 0.8:
+            self.get_logger().info(
+                f"✅ [PIN CLEARED] {ns} arrived within {dist:.2f}m of pin ({px:.2f}, {py:.2f})! Forward camera verified target."
+            )
+            self._cleared_pins.add((px, py))
+            if (px, py) in self._candidate_pins:
+                self._candidate_pins.remove((px, py))
+            del self._rover_pin_claims[ns]
 
     def _labels_near(self, cell, r=3):
         i, j = cell
@@ -638,6 +674,44 @@ class GoalAssigner(Node):
                 pass
 
         for ns, rx, ry in idle:
+            # 1. Check if this robot has arrived near its claimed pin
+            self._check_pin_clearance(ns, rx, ry)
+            # -------------------------------------------------------------
+            # PRIORITY 1: Aerial Candidate Pin Dispatch
+            # -------------------------------------------------------------
+            if self._candidate_pins:
+                unclaimed_pins = [
+                    p
+                    for p in self._candidate_pins
+                    if p not in self._rover_pin_claims.values()
+                ]
+                if unclaimed_pins:
+                    # Sort unclaimed pins by distance to this rover
+                    unclaimed_pins.sort(
+                        key=lambda p: (p[0] - rx) ** 2 + (p[1] - ry) ** 2
+                    )
+                    best_pin = unclaimed_pins[0]
+                    pin_dist = math.hypot(best_pin[0] - rx, best_pin[1] - ry)
+
+                    # If within operational reach (< 7.0m)
+                    if pin_dist < 7.0:
+                        goal = self._find_goal(best_pin, (rx, ry)) or best_pin
+                        try:
+                            pose_robot = self._transform_pose_to_robot_frame(goal, ns)
+                            self._rover_pin_claims[ns] = best_pin
+                            self.get_logger().info(
+                                f"🚨 [HIGH PRIORITY] Dispatching {ns} to aerial pin at {best_pin} ({pin_dist:.2f}m away)!"
+                            )
+                            self._send_goal(ns, pose_robot, goal)
+                            continue  # Rover assigned to pin! Move to next idle rover
+                        except Exception as e:
+                            self.get_logger().warn(
+                                f"Failed to transform pin goal for {ns}: {e}"
+                            )
+            # -------------------------------------------------------------
+            # PRIORITY 2: Standard Frontier Exploration (Patterns 1-6)
+            # -------------------------------------------------------------
+
             if not frontiers:
                 break
 
