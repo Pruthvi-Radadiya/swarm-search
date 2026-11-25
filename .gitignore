@@ -13,7 +13,6 @@ __pycache__/
 .DS_Store
 
 # Local notes 
-docs/
 
 # Runtime junk
 launch/tmp_sdf/

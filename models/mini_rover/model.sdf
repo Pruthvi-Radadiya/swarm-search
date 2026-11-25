@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <model name="mini_rover">
+    <pose>0 0 0.033 0 0 0</pose>
+
+    <!-- 1. CHASSIS (Low Center of Mass, Cannot Tip) -->
+    <link name="base_link">
+      <inertial>
+        <pose>0 0 0.01 0 0 0</pose>
+        <mass>1.5</mass>
+        <inertia>
+          <ixx>0.0035</ixx>
+          <iyy>0.0035</iyy>
+          <izz>0.006</izz>
+        </inertia>
+      </inertial>
+      <collision name="chassis_collision">
+        <pose>0 0 0.015 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.16 0.14 0.03</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="chassis_visual">
+        <pose>0 0 0.015 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.16 0.14 0.03</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.2 0.3 1</ambient>
+          <diffuse>0.2 0.4 0.7 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Front Caster (Anti-Tip) -->
+      <collision name="front_caster_collision">
+        <pose>0.065 0 -0.018 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.015</radius>
+          </sphere>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.001</mu>
+              <mu2>0.001</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="front_caster_visual">
+        <pose>0.065 0 -0.018 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.015</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.3 0.3 0.3 1</ambient>
+          <diffuse>0.5 0.5 0.5 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Rear Caster (Anti-Tip) -->
+      <collision name="rear_caster_collision">
+        <pose>-0.065 0 -0.018 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.015</radius>
+          </sphere>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.001</mu>
+              <mu2>0.001</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="rear_caster_visual">
+        <pose>-0.065 0 -0.018 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.015</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.3 0.3 0.3 1</ambient>
+          <diffuse>0.5 0.5 0.5 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 2. SENSOR: 2D LIDAR (360 beams, 5 Hz) -->
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0 0 0.045 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>5.0</update_rate>
+        <topic>scan</topic>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159265</min_angle>
+              <max_angle>3.14159265</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.12</min>
+            <max>8.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+      </sensor>
+
+      <!-- Lidar Visual on Link -->
+      <visual name="lidar_link_visual">
+        <pose>0 0 0.045 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.03</radius>
+            <length>0.02</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.1 0.1 0.1 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 3. SENSOR: FORWARD RGB CAMERA (320x240, 5 Hz) -->
+      <sensor name="camera_forward" type="camera">
+        <pose>0.08 0 0.02 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>5.0</update_rate>
+        <topic>camera/image_raw</topic>
+        <camera>
+          <horizontal_fov>1.085</horizontal_fov>
+          <image>
+            <width>320</width>
+            <height>240</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>8.0</far>
+          </clip>
+        </camera>
+      </sensor>
+    </link>
+
+    <!-- 4. LEFT WHEEL -->
+    <link name="left_wheel">
+      <pose>0 0.08 0 -1.5707963 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>0.00003</ixx>
+          <iyy>0.00003</iyy>
+          <izz>0.00005</izz>
+        </inertia>
+      </inertial>
+      <collision name="left_wheel_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.033</radius>
+            <length>0.018</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="left_wheel_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.033</radius>
+            <length>0.018</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- 5. RIGHT WHEEL -->
+    <link name="right_wheel">
+      <pose>0 -0.08 0 -1.5707963 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>0.00003</ixx>
+          <iyy>0.00003</iyy>
+          <izz>0.00005</izz>
+        </inertia>
+      </inertial>
+      <collision name="right_wheel_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.033</radius>
+            <length>0.018</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="right_wheel_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.033</radius>
+            <length>0.018</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- 6. JOINTS -->
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>left_wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>right_wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
+    <!-- 7. MODERN GAZEBO DIFF-DRIVE PLUGIN -->
+    <plugin
+      filename="gz-sim-diff-drive-system"
+      name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>0.16</wheel_separation>
+      <wheel_radius>0.033</wheel_radius>
+      <max_linear_acceleration>1.0</max_linear_acceleration>
+      <min_linear_acceleration>-1.0</min_linear_acceleration>
+      <max_angular_acceleration>2.0</max_angular_acceleration>
+      <min_angular_acceleration>-2.0</min_angular_acceleration>
+      <topic>cmd_vel</topic>
+      <odom_topic>odom</odom_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_footprint</child_frame_id>
+    </plugin>
+  </model>
+</sdf>
